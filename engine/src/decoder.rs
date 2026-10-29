@@ -163,7 +163,7 @@ impl Decoder {
             let needs_new = self
                 .sample_buf
                 .as_ref()
-                .map_or(true, |b| (b.capacity() as u64) < capacity * spec.channels.count() as u64);
+                .is_none_or(|b| (b.capacity() as u64) < capacity * spec.channels.count() as u64);
             if needs_new {
                 self.sample_buf = Some(SampleBuffer::new(capacity, spec));
             }

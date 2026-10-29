@@ -29,6 +29,6 @@ cargo build --release
 
 - [x] FLAC / ALAC / WAV / AIFF / MP3 / AAC
 - [x] macOS 出力（Hog Mode・レート切替・物理フォーマット選択）
-- [ ] Windows 出力（WASAPI 排他モード）
+- [x] Windows 出力（WASAPI 排他モード・ポーリング駆動。実機未検証）
 - [ ] GUI（フォルダ再生 + キュー）
 - [ ] 非対応レートの音源をデバイスに合わせて変換する処理
