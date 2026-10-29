@@ -1,0 +1,12 @@
+[package]
+name = "hifi-engine"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+rtrb = "0.3"
+symphonia = { version = "0.5", features = ["all"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+coreaudio-sys = "0.2"

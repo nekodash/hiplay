@@ -1,0 +1,13 @@
+[package]
+name = "hifi-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "hiplay"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+ctrlc = "3"
+hifi-engine = { path = "../engine" }
