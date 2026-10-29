@@ -21,9 +21,11 @@ use crate::decoder::{Decoder, SourceFormat};
 /// リングバッファの長さ（秒）
 const BUFFER_SECS: usize = 2;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     TogglePause,
+    /// キューの末尾に曲を足す（再生は止めない）
+    Append(Vec<PathBuf>),
     Next,
     Prev,
     Seek(f64),
@@ -104,7 +106,8 @@ pub struct Player {
 
 impl Player {
     /// `device` は出力デバイス名の一部（None なら既定の出力）。
-    pub fn new(device: Option<&str>, queue: Vec<PathBuf>) -> Result<Self> {
+    /// キューの `start` 番目の曲の `start_at` 秒から再生を始める。
+    pub fn new(device: Option<&str>, queue: Vec<PathBuf>, start: usize, start_at: Option<f64>) -> Result<Self> {
         let device = Device::open(device)?;
         let device_name = device.name.clone();
         let shared = Arc::new(Shared::default());
@@ -114,7 +117,7 @@ impl Player {
             let shared = shared.clone();
             thread::Builder::new()
                 .name("hifi-decoder".into())
-                .spawn(move || Engine::new(device, queue, rx, shared).run())?
+                .spawn(move || Engine::new(device, queue, rx, shared).run(start, start_at))?
         };
         Ok(Self {
             tx,
@@ -179,10 +182,10 @@ impl Engine {
         }
     }
 
-    fn run(mut self) {
+    fn run(mut self, start: usize, start_at: Option<f64>) {
         let mut out: Option<Active> = None;
-        let mut idx = 0;
-        let mut seek_to: Option<f64> = None;
+        let mut idx = start;
+        let mut seek_to = start_at;
 
         while idx < self.queue.len() {
             let path = self.queue[idx].clone();
@@ -308,13 +311,14 @@ impl Engine {
         })
     }
 
-    /// 一時停止はここで処理し、それ以外のコマンドを返す。
-    fn poll(&self) -> Option<Command> {
+    /// 一時停止とキューへの追加はここで処理し、それ以外のコマンドを返す。
+    fn poll(&mut self) -> Option<Command> {
         loop {
             match self.rx.try_recv() {
                 Ok(Command::TogglePause) => {
                     self.shared.paused.fetch_xor(true, Ordering::Relaxed);
                 }
+                Ok(Command::Append(paths)) => self.queue.extend(paths),
                 Ok(cmd) => return Some(cmd),
                 Err(TryRecvError::Empty) => return None,
                 Err(TryRecvError::Disconnected) => return Some(Command::Stop),
@@ -322,7 +326,7 @@ impl Engine {
         }
     }
 
-    fn push(&self, a: &mut Active, samples: &[f32]) -> Option<Interrupt> {
+    fn push(&mut self, a: &mut Active, samples: &[f32]) -> Option<Interrupt> {
         let mut off = 0;
         while off < samples.len() {
             let n = a.producer.slots().min(samples.len() - off);
@@ -342,7 +346,7 @@ impl Engine {
     }
 
     /// バッファを鳴らし切るまで待つ。途中でコマンドが来たらそれを返す。
-    fn drain(&self, a: &mut Active) -> Option<Interrupt> {
+    fn drain(&mut self, a: &mut Active) -> Option<Interrupt> {
         while a.producer.slots() < a.capacity {
             if let Some(intr) = self.check(a) {
                 return Some(intr);
@@ -356,7 +360,7 @@ impl Engine {
 
     /// バッファの空き待ちの間に、コマンドとデバイスの状態を確かめる。
     /// デコードはバッファより速く進むので、再生中はほぼ常にここを通る。
-    fn check(&self, a: &Active) -> Option<Interrupt> {
+    fn check(&mut self, a: &Active) -> Option<Interrupt> {
         if let Some(cmd) = self.poll() {
             return Some(Interrupt::Cmd(cmd));
         }
@@ -397,6 +401,10 @@ impl Engine {
                 }
                 Ok(Command::Seek(secs)) => *seek_to = Some(secs),
                 Ok(Command::TogglePause) => {}
+                Ok(Command::Append(paths)) => {
+                    self.queue.extend(paths);
+                    continue;
+                }
             }
             // 既定のデバイスへは切り替えない（DAC を抜いたらスピーカーから鳴る、を避ける）
             match Device::open(Some(&self.device_key)) {
@@ -428,7 +436,7 @@ impl Engine {
                 *seek_to = Some(secs);
             }
             Command::Stop => return false,
-            Command::TogglePause => {}
+            Command::TogglePause | Command::Append(_) => {}
         }
         true
     }

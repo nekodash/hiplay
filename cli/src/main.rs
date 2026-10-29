@@ -6,14 +6,14 @@
 //! 再生中は p+Enter で一時停止、n で次、b で前、s 秒数 でシーク、q で終了。
 
 use std::io::{self, BufRead, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
 use anyhow::{bail, Result};
 use hifi_engine::backend::list_devices;
-use hifi_engine::decoder::SUPPORTED_EXTENSIONS;
+use hifi_engine::decoder::collect_files;
 use hifi_engine::{Command, Player};
 
 fn main() -> Result<()> {
@@ -33,13 +33,13 @@ fn main() -> Result<()> {
 
     let mut queue = Vec::new();
     for input in &inputs {
-        collect(input, &mut queue);
+        collect_files(input, &mut queue);
     }
     if queue.is_empty() {
         bail!("再生できるファイルがありません");
     }
 
-    let player = Player::new(device.as_deref(), queue)?;
+    let player = Player::new(device.as_deref(), queue, 0, None)?;
     println!("出力: {}（専有: {}）", player.device_name, if player.status().exclusive { "はい" } else { "いいえ" });
 
     let quit = Arc::new(AtomicBool::new(false));
@@ -144,23 +144,6 @@ fn print_devices() -> Result<()> {
         );
     }
     Ok(())
-}
-
-fn collect(path: &Path, out: &mut Vec<PathBuf>) {
-    if path.is_dir() {
-        let Ok(entries) = std::fs::read_dir(path) else { return };
-        let mut children: Vec<PathBuf> = entries.filter_map(|e| e.ok().map(|e| e.path())).collect();
-        children.sort();
-        for child in children {
-            collect(&child, out);
-        }
-    } else if path
-        .extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| SUPPORTED_EXTENSIONS.contains(&e.to_lowercase().as_str()))
-    {
-        out.push(path.to_path_buf());
-    }
 }
 
 fn fmt_time(secs: f64) -> String {

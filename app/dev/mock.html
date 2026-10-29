@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HiFi Player（模擬バックエンド）</title>
+  <link rel="stylesheet" href="../ui/style.css">
+</head>
+<body>
+<script>
+// ブラウザで画面を確かめるための模擬 __TAURI__。本番の ui/ は変更しない。
+// window.mock.addFolder() / window.mock.lose() / window.mock.reconnect() で状態を作れる。
+(() => {
+  const TRACKS = [
+    { title: "Prelude", artist: "Test Ensemble", album: "Signal Path", trackNumber: 1, durationSecs: 184, codec: "flac", rate: 96000, bits: 24, lossless: true },
+    { title: "Allemande", artist: "Test Ensemble", album: "Signal Path", trackNumber: 2, durationSecs: 241, codec: "flac", rate: 96000, bits: 24, lossless: true },
+    { title: "Courante (CD rip)", artist: "Test Ensemble", album: "Signal Path", trackNumber: 3, durationSecs: 139, codec: "alac", rate: 44100, bits: 16, lossless: true },
+    { title: "とても長い日本語のタイトルが表示幅を超えたときに省略されるかの確認用トラック", artist: "テスト・アーティスト", album: "長いアルバム名のテスト", trackNumber: 4, durationSecs: 305, codec: "mp3", rate: 48000, bits: null, lossless: false },
+    { title: "Mono Field Recording", artist: "Archive", album: "Mono", trackNumber: 5, durationSecs: 95, codec: "pcm_s16be", rate: 44100, bits: 16, lossless: true },
+  ];
+  const DEVICES = [
+    { name: "MacBook Proのスピーカー", isDefault: true, currentRate: 48000, supportedRates: [44100, 48000, 88200, 96000] },
+    { name: "USB DAC", isDefault: false, currentRate: 44100, supportedRates: [44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000] },
+  ];
+  const meta = new Map(TRACKS.map((t, i) => [`/Music/Signal Path/${String(i + 1).padStart(2, "0")}.${t.codec === "mp3" ? "mp3" : "flac"}`, t]));
+  const s = { queue: [], index: null, pos: 0, paused: false, active: false, finished: false, lost: false, error: null, device: null };
+  let last = performance.now();
+  setInterval(() => {
+    const now = performance.now();
+    const dt = (now - last) / 1000;
+    last = now;
+    if (!s.active || s.finished || s.paused || s.lost) return;
+    s.pos += dt * 8; // 確認しやすいよう 8 倍速
+    const t = meta.get(s.queue[s.index]);
+    if (t && s.pos >= t.durationSecs) {
+      s.index += 1;
+      s.pos = 0;
+      if (s.index >= s.queue.length) s.finished = true;
+    }
+  }, 100);
+  const handlers = {
+    devices: () => DEVICES,
+    scan: ({ paths }) => [...meta.entries()].map(([path, t]) => ({ path, ...t })),
+    cover: () => new ArrayBuffer(0),
+    play: ({ queue, index }) => Object.assign(s, { queue, index, pos: 0, paused: false, active: true, finished: false, error: null }),
+    append: ({ paths }) => s.queue.push(...paths),
+    control: ({ action }) => {
+      if (action === "stop") return Object.assign(s, { active: false, index: null });
+      if (action === "toggle") {
+        if (s.finished) return Object.assign(s, { index: 0, pos: 0, finished: false });
+        if (s.lost) return Object.assign(s, { lost: false, paused: false, error: null });
+        s.paused = !s.paused;
+      }
+      if (action === "next") Object.assign(s, { index: Math.min(s.index + 1, s.queue.length - 1), pos: 0 });
+      if (action === "prev") s.pos > 3 ? (s.pos = 0) : Object.assign(s, { index: Math.max(s.index - 1, 0), pos: 0 });
+    },
+    seek: ({ secs }) => (s.pos = secs),
+    set_device: ({ name }) => (s.device = name),
+    status: () => {
+      if (!s.active) return { active: false };
+      const t = meta.get(s.queue[s.index]) ?? {};
+      const dev = DEVICES.find((d) => d.name === s.device) ?? DEVICES[0];
+      return {
+        active: true, index: s.finished ? null : s.index, path: s.queue[s.index], positionSecs: s.pos,
+        durationSecs: t.durationSecs, paused: s.paused || s.lost, finished: s.finished, deviceLost: s.lost,
+        exclusive: true, deviceName: dev.name, codec: t.codec, sourceRate: t.rate, sourceBits: t.bits,
+        sourceChannels: t.title?.startsWith("Mono") ? 1 : 2, lossless: t.lossless,
+        outputRate: dev.supportedRates.includes(t.rate) ? t.rate : 48000, outputBits: 24, error: s.error,
+      };
+    },
+  };
+  let dropHandler = null;
+  window.__TAURI__ = {
+    core: { invoke: async (cmd, args = {}) => { const r = handlers[cmd](args); return structuredClone(r ?? null); } },
+    dialog: { open: async () => ["/Music/Signal Path"] },
+    webview: { getCurrentWebview: () => ({ onDragDropEvent: (h) => (dropHandler = h) }) },
+  };
+  window.mock = {
+    state: s,
+    drag: (type) => dropHandler?.({ payload: { type, paths: ["/Music/Signal Path"] } }),
+    lose: () => Object.assign(s, { lost: true, error: "出力デバイスが切断されました" }),
+    error: (m) => (s.error = m),
+  };
+})();
+</script>
+<script>
+  fetch("../ui/index.html")
+    .then((r) => r.text())
+    .then((html) => {
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      doc.querySelectorAll("script").forEach((el) => el.remove());
+      document.body.insertAdjacentHTML("beforeend", doc.body.innerHTML);
+      const script = document.createElement("script");
+      script.src = "../ui/app.js";
+      document.body.append(script);
+    });
+</script>
+</body>
+</html>

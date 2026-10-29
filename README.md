@@ -14,6 +14,18 @@
 
 - `engine/` 再生エンジン（Symphonia でデコード → リングバッファ → OS ごとの出力）
 - `cli/` 動作確認用 CLI `hiplay`
+- `app/` GUI（Tauri 2）。画面は `app/ui/` の素の HTML/JS で、再生はエンジンに任せる
+  - `app/dev/mock.html` は模擬バックエンドで画面だけをブラウザで確かめるためのページ
+
+## GUI のビルド
+
+```bash
+cd app && npm install && npx tauri build --bundles app
+```
+
+`target/release/bundle/macos/HiFi Player.app` ができる。開発中は `cd app && npx tauri dev`。
+
+操作: 曲をダブルクリックで再生、Space で再生／一時停止、←→ で 10 秒移動、Shift+←→ で前後の曲。
 
 ## 使い方（CLI）
 
@@ -31,5 +43,5 @@ cargo build --release
 - [x] macOS 出力（Hog Mode・レート切替・物理フォーマット選択）
 - [x] Windows 出力（WASAPI 排他モード・ポーリング駆動。実機未検証）
 - [x] 再生中の切断（一時停止して位置を保持、同じデバイスにつなぎ直して再開。既定デバイスへは切り替えない）
-- [ ] GUI（フォルダ再生 + キュー）
+- [x] GUI（フォルダ再生 + キュー、ドラッグ＆ドロップ、信号経路の表示、出力デバイスの切り替え）
 - [ ] 非対応レートの音源をデバイスに合わせて変換する処理

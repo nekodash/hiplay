@@ -1,0 +1,15 @@
+[package]
+name = "hifi-app"
+version = "0.1.0"
+edition = "2021"
+description = "音質優先の音楽プレイヤー"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+hifi-engine = { path = "../../engine" }
+serde = { version = "1", features = ["derive"] }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"

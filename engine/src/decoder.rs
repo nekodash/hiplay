@@ -20,6 +20,24 @@ pub const SUPPORTED_EXTENSIONS: &[&str] = &[
     "flac", "alac", "m4a", "mp4", "wav", "aif", "aiff", "aifc", "mp3", "aac",
 ];
 
+/// フォルダなら中の対応ファイルをパス順に再帰的に集め、ファイルならそのまま加える。
+pub fn collect_files(path: &Path, out: &mut Vec<std::path::PathBuf>) {
+    if path.is_dir() {
+        let Ok(entries) = std::fs::read_dir(path) else { return };
+        let mut children: Vec<_> = entries.filter_map(|e| e.ok().map(|e| e.path())).collect();
+        children.sort();
+        for child in children {
+            collect_files(&child, out);
+        }
+    } else if path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| SUPPORTED_EXTENSIONS.contains(&e.to_lowercase().as_str()))
+    {
+        out.push(path.to_path_buf());
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SourceFormat {
     pub sample_rate: u32,
