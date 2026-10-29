@@ -176,9 +176,13 @@ impl Device {
             None => default_output()?,
             Some(sel) => {
                 let sel_lower = sel.to_lowercase();
-                list_devices()?
-                    .into_iter()
-                    .find(|d| d.id == sel || d.name.to_lowercase().contains(&sel_lower))
+                let devices = list_devices()?;
+                // 完全一致を優先し、なければ名前の一部で探す
+                devices
+                    .iter()
+                    .find(|d| d.id == sel || d.name == sel)
+                    .or_else(|| devices.iter().find(|d| d.name.to_lowercase().contains(&sel_lower)))
+                    .cloned()
                     .ok_or_else(|| anyhow!("出力デバイス「{sel}」が見つかりません"))?
                     .id
                     .parse()?
@@ -200,6 +204,11 @@ impl Device {
 
     pub fn exclusive(&self) -> bool {
         self.hogged
+    }
+
+    /// 再接続のときに同じデバイスを探すためのキー。抜き差しで AudioObjectID は変わるので名前を使う。
+    pub fn key(&self) -> String {
+        self.name.clone()
     }
 
     /// デバイスを `rate` に切り替え、物理フォーマットを選ぶ。
@@ -343,6 +352,16 @@ pub struct Stream {
 }
 
 unsafe impl Send for Stream {}
+
+impl Stream {
+    /// 出力が続けられなくなっていればその理由を返す。
+    pub fn error(&self) -> Option<String> {
+        match get::<u32>(self.device, addr(kAudioDevicePropertyDeviceIsAlive, kAudioObjectPropertyScopeGlobal)) {
+            Ok(alive) if alive != 0 => None,
+            _ => Some("出力デバイスが切断されました".into()),
+        }
+    }
+}
 
 impl Drop for Stream {
     fn drop(&mut self) {

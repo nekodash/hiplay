@@ -111,7 +111,13 @@ fn main() -> Result<()> {
                 "\r   {} / {} {}   ",
                 fmt_time(st.position_secs),
                 dur,
-                if st.paused { "[一時停止]" } else { "" }
+                if st.device_lost {
+                    "[切断中: つなぎ直して p で再開]"
+                } else if st.paused {
+                    "[一時停止]"
+                } else {
+                    ""
+                }
             );
             io::stdout().flush().ok();
         }

@@ -2,6 +2,9 @@
 //!
 //! 同じサンプルレート・チャンネル数の曲が続く間はストリームを止めずに書き足すので、曲間は途切れない（ギャップレス）。
 //! フォーマットが変わるときだけバッファを鳴らし切ってからデバイスを切り替える。
+//!
+//! 再生中にデバイスが切断されたら、その曲と位置を覚えて一時停止する。
+//! 次にコマンドが来たら同じデバイスを開き直し、覚えた位置から再開する。
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -10,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use crate::backend::{Device, OutputFormat, Stream};
 use crate::decoder::{Decoder, SourceFormat};
@@ -43,6 +46,8 @@ pub struct Status {
     pub paused: bool,
     pub output: Option<OutputFormat>,
     pub exclusive: bool,
+    /// 出力デバイスが切断され、再接続を待っている
+    pub device_lost: bool,
     pub finished: bool,
     pub last_error: Option<String>,
 }
@@ -61,6 +66,7 @@ struct Shared {
     segments: Mutex<Vec<Segment>>,
     output: Mutex<Option<OutputFormat>>,
     exclusive: AtomicBool,
+    device_lost: AtomicBool,
     finished: AtomicBool,
     last_error: Mutex<Option<String>>,
 }
@@ -78,6 +84,7 @@ impl Shared {
             paused: self.paused.load(Ordering::Relaxed),
             output,
             exclusive: self.exclusive.load(Ordering::Relaxed),
+            device_lost: self.device_lost.load(Ordering::Relaxed),
             finished: self.finished.load(Ordering::Relaxed),
             last_error: self.last_error.lock().unwrap().clone(),
         }
@@ -135,8 +142,14 @@ impl Drop for Player {
     }
 }
 
+/// デコードを中断する理由
+enum Interrupt {
+    Cmd(Command),
+    DeviceLost(String),
+}
+
 struct Active {
-    _stream: Stream,
+    stream: Stream,
     producer: rtrb::Producer<f32>,
     capacity: usize,
     written_frames: u64,
@@ -145,7 +158,9 @@ struct Active {
 }
 
 struct Engine {
-    device: Device,
+    /// 切断中は None
+    device: Option<Device>,
+    device_key: String,
     queue: Vec<PathBuf>,
     rx: Receiver<Command>,
     shared: Arc<Shared>,
@@ -155,7 +170,8 @@ struct Engine {
 impl Engine {
     fn new(device: Device, queue: Vec<PathBuf>, rx: Receiver<Command>, shared: Arc<Shared>) -> Self {
         Self {
-            device,
+            device_key: device.key(),
+            device: Some(device),
             queue,
             rx,
             shared,
@@ -192,9 +208,9 @@ impl Engine {
                 .is_some_and(|a| a.rate == src.sample_rate && a.channels == src.channels as usize);
             if !same_format {
                 if let Some(a) = out.as_mut() {
-                    if let Some(cmd) = self.drain(a) {
+                    if let Some(intr) = self.drain(a) {
                         out = None;
-                        if !self.apply(cmd, idx, &mut idx, &mut seek_to) {
+                        if !self.handle(intr, idx, &mut idx, &mut seek_to) {
                             return self.finish();
                         }
                         continue;
@@ -226,12 +242,12 @@ impl Engine {
 
             let interrupted = loop {
                 if let Some(cmd) = self.poll() {
-                    break Some(cmd);
+                    break Some(Interrupt::Cmd(cmd));
                 }
                 match dec.next_block() {
                     Ok(Some(samples)) => {
-                        if let Some(cmd) = self.push(a, samples) {
-                            break Some(cmd);
+                        if let Some(intr) = self.push(a, samples) {
+                            break Some(intr);
                         }
                     }
                     Ok(None) => break None,
@@ -244,10 +260,10 @@ impl Engine {
 
             match interrupted {
                 None => idx += 1,
-                Some(cmd) => {
+                Some(intr) => {
                     // バッファに残った分を捨てる
                     out = None;
-                    if !self.apply(cmd, idx, &mut idx, &mut seek_to) {
+                    if !self.handle(intr, idx, &mut idx, &mut seek_to) {
                         return self.finish();
                     }
                 }
@@ -265,8 +281,9 @@ impl Engine {
     }
 
     fn start_stream(&mut self, src: SourceFormat) -> Result<Active> {
+        let device = self.device.as_mut().ok_or_else(|| anyhow!("出力デバイスが開かれていません"))?;
         if self.configured_rate != Some(src.sample_rate) {
-            let fmt = self.device.configure(src.sample_rate)?;
+            let fmt = device.configure(src.sample_rate)?;
             *self.shared.output.lock().unwrap() = Some(fmt);
             self.configured_rate = Some(src.sample_rate);
         }
@@ -275,14 +292,14 @@ impl Engine {
         let (producer, consumer) = rtrb::RingBuffer::new(capacity);
         self.shared.played_frames.store(0, Ordering::Relaxed);
         self.shared.segments.lock().unwrap().clear();
-        let stream = self.device.start(
+        let stream = device.start(
             consumer,
             channels,
             self.shared.played_frames.clone(),
             self.shared.paused.clone(),
         )?;
         Ok(Active {
-            _stream: stream,
+            stream,
             producer,
             capacity,
             written_frames: 0,
@@ -305,13 +322,13 @@ impl Engine {
         }
     }
 
-    fn push(&self, a: &mut Active, samples: &[f32]) -> Option<Command> {
+    fn push(&self, a: &mut Active, samples: &[f32]) -> Option<Interrupt> {
         let mut off = 0;
         while off < samples.len() {
             let n = a.producer.slots().min(samples.len() - off);
             if n == 0 {
-                if let Some(cmd) = self.poll() {
-                    return Some(cmd);
+                if let Some(intr) = self.check(a) {
+                    return Some(intr);
                 }
                 thread::sleep(Duration::from_millis(5));
                 continue;
@@ -325,16 +342,75 @@ impl Engine {
     }
 
     /// バッファを鳴らし切るまで待つ。途中でコマンドが来たらそれを返す。
-    fn drain(&self, a: &mut Active) -> Option<Command> {
+    fn drain(&self, a: &mut Active) -> Option<Interrupt> {
         while a.producer.slots() < a.capacity {
-            if let Some(cmd) = self.poll() {
-                return Some(cmd);
+            if let Some(intr) = self.check(a) {
+                return Some(intr);
             }
             thread::sleep(Duration::from_millis(5));
         }
         // デバイス側のバッファに残っている分
         thread::sleep(Duration::from_millis(100));
         None
+    }
+
+    /// バッファの空き待ちの間に、コマンドとデバイスの状態を確かめる。
+    /// デコードはバッファより速く進むので、再生中はほぼ常にここを通る。
+    fn check(&self, a: &Active) -> Option<Interrupt> {
+        if let Some(cmd) = self.poll() {
+            return Some(Interrupt::Cmd(cmd));
+        }
+        a.stream.error().map(Interrupt::DeviceLost)
+    }
+
+    /// 中断の理由に応じて次に再生する位置を決める。停止なら false。
+    fn handle(&mut self, intr: Interrupt, decoding: usize, idx: &mut usize, seek_to: &mut Option<f64>) -> bool {
+        match intr {
+            Interrupt::Cmd(cmd) => self.apply(cmd, decoding, idx, seek_to),
+            Interrupt::DeviceLost(reason) => {
+                let st = self.shared.status();
+                *idx = st.track.as_ref().map_or(decoding, |t| t.index);
+                *seek_to = st.track.is_some().then_some(st.position_secs);
+                self.wait_reconnect(reason, idx, seek_to)
+            }
+        }
+    }
+
+    /// 切断後、コマンドが来るたびに同じデバイスを開き直す。開けたら true、停止なら false。
+    fn wait_reconnect(&mut self, reason: String, idx: &mut usize, seek_to: &mut Option<f64>) -> bool {
+        // 古いデバイスの専有を先に解く（同じデバイスが戻ってきたときに新しい側を解放しないように）
+        self.device = None;
+        self.configured_rate = None;
+        self.shared.paused.store(true, Ordering::Relaxed);
+        self.shared.device_lost.store(true, Ordering::Relaxed);
+        self.shared.error(reason);
+        loop {
+            match self.rx.recv() {
+                Err(_) | Ok(Command::Stop) => return false,
+                Ok(Command::Next) => {
+                    *idx += 1;
+                    *seek_to = None;
+                }
+                Ok(Command::Prev) => {
+                    *idx = idx.saturating_sub(1);
+                    *seek_to = None;
+                }
+                Ok(Command::Seek(secs)) => *seek_to = Some(secs),
+                Ok(Command::TogglePause) => {}
+            }
+            // 既定のデバイスへは切り替えない（DAC を抜いたらスピーカーから鳴る、を避ける）
+            match Device::open(Some(&self.device_key)) {
+                Ok(device) => {
+                    self.shared.exclusive.store(device.exclusive(), Ordering::Relaxed);
+                    self.device = Some(device);
+                    self.shared.device_lost.store(false, Ordering::Relaxed);
+                    self.shared.paused.store(false, Ordering::Relaxed);
+                    *self.shared.last_error.lock().unwrap() = None;
+                    return true;
+                }
+                Err(e) => self.shared.error(format!("再接続できません: {e:#}")),
+            }
+        }
     }
 
     /// コマンドに従って次に再生する位置を決める。停止なら false。

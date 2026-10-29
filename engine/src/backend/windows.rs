@@ -11,7 +11,7 @@
 //! WASAPI の処理はすべて自前のスレッドで MTA として行う。
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -40,6 +40,7 @@ const AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED: u32 = 0x8889_0019;
 const AUDCLNT_E_DEVICE_IN_USE: u32 = 0x8889_000A;
 const AUDCLNT_E_UNSUPPORTED_FORMAT: u32 = 0x8889_0008;
 const AUDCLNT_E_EXCLUSIVE_MODE_NOT_ALLOWED: u32 = 0x8889_000E;
+const AUDCLNT_E_DEVICE_INVALIDATED: u32 = 0x8889_0004;
 
 /// MTA で初期化したスレッドで `f` を実行する。
 fn with_mta<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
@@ -65,6 +66,7 @@ fn describe(e: WasapiError) -> anyhow::Error {
         Some(AUDCLNT_E_EXCLUSIVE_MODE_NOT_ALLOWED) => anyhow!(
             "排他モードが許可されていません（サウンド設定 → デバイスのプロパティ → 詳細 で「アプリケーションによりこのデバイスを排他的に制御できるようにする」を有効にしてください）"
         ),
+        Some(AUDCLNT_E_DEVICE_INVALIDATED) => anyhow!("出力デバイスが切断されました"),
         _ => anyhow!("WASAPI のエラー: {e}"),
     }
 }
@@ -159,6 +161,11 @@ impl Device {
         true
     }
 
+    /// 再接続のときに同じデバイスを探すためのキー。エンドポイント ID は抜き差ししても変わらない。
+    pub fn key(&self) -> String {
+        self.id.clone()
+    }
+
     /// `rate` で使う形式を決める。
     pub fn configure(&mut self, rate: u32) -> Result<OutputFormat> {
         let id = self.id.clone();
@@ -189,9 +196,11 @@ impl Device {
         let format = self.format.clone().ok_or_else(|| anyhow!("configure の前に start が呼ばれました"))?;
         let id = self.id.clone();
         let stop = Arc::new(AtomicBool::new(false));
+        let failure = Arc::new(Mutex::new(None));
         let (ready_tx, ready_rx) = mpsc::channel();
         let thread = {
             let stop = stop.clone();
+            let failure = failure.clone();
             thread::Builder::new().name("hifi-wasapi".into()).spawn(move || {
                 let _ = initialize_mta();
                 let mut ctx = RenderCtx {
@@ -202,13 +211,18 @@ impl Device {
                     format,
                 };
                 if let Err(e) = ctx.run(&id, &stop, &ready_tx) {
-                    // 開始前の失敗は start の戻り値で伝える。開始後の失敗はここで止まる
+                    // 開始前の失敗は start の戻り値で、開始後の失敗は Stream::error で伝える
+                    *failure.lock().unwrap() = Some(format!("{e:#}"));
                     let _ = ready_tx.send(Err(e));
                 }
             })?
         };
         match ready_rx.recv() {
-            Ok(Ok(())) => Ok(Stream { stop, thread: Some(thread) }),
+            Ok(Ok(())) => Ok(Stream {
+                stop,
+                failure,
+                thread: Some(thread),
+            }),
             Ok(Err(e)) => {
                 let _ = thread.join();
                 Err(e)
@@ -223,7 +237,15 @@ impl Device {
 
 pub struct Stream {
     stop: Arc<AtomicBool>,
+    failure: Arc<Mutex<Option<String>>>,
     thread: Option<JoinHandle<()>>,
+}
+
+impl Stream {
+    /// 出力が続けられなくなっていればその理由を返す。
+    pub fn error(&self) -> Option<String> {
+        self.failure.lock().unwrap().clone()
+    }
 }
 
 impl Drop for Stream {
