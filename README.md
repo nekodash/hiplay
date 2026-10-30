@@ -53,7 +53,14 @@ git tag v0.1.0 && git push origin v0.1.0
 xattr -dr com.apple.quarantine "/Applications/HiFi Player.app"
 ```
 
-Windows の初回起動では SmartScreen の「詳細情報」→「実行」で起動する。
+Windows では、ブラウザで落としたファイルに付く「インターネットから来た」印（Mark of the Web）で SmartScreen の確認が出る。
+自分で使う分には、印を外せば確認なしで起動できる（エクスプローラーのプロパティで「許可する」にチェックしても同じ）。
+
+```powershell
+Unblock-File .\HiFi.Player_0.1.0_x64-setup.exe
+```
+
+`gh release download` や `curl.exe` で落としたファイルには、通常この印が付かない。
 
 ## 対応状況
 
