@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "HiFi Player",
+  "productName": "HiPlay",
   "version": "0.1.0",
-  "identifier": "local.kag.hifiplayer",
+  "identifier": "local.kag.hiplay",
   "build": {
     "frontendDist": "../ui"
   },
@@ -11,7 +11,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "HiFi Player",
+        "title": "HiPlay",
         "width": 980,
         "height": 700,
         "minWidth": 640,
@@ -41,5 +41,6 @@
       "signingIdentity": "-",
       "minimumSystemVersion": "11.0"
     }
-  }
+  },
+  "mainBinaryName": "HiPlay"
 }

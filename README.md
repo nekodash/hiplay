@@ -1,4 +1,4 @@
-# hifi-player
+# HiPlay
 
 個人用の音質優先・音楽再生専用プレイヤー（macOS / Windows）。
 
@@ -23,7 +23,7 @@
 cd app && npm install && npx tauri build --bundles app
 ```
 
-`target/release/bundle/macos/HiFi Player.app` ができる。開発中は `cd app && npx tauri dev`。
+`target/release/bundle/macos/HiPlay.app` ができる。開発中は `cd app && npx tauri dev`。
 
 操作: 曲をダブルクリックで再生、Space で再生／一時停止、←→ で 10 秒移動、Shift+←→ で前後の曲。
 
@@ -47,17 +47,19 @@ git tag v0.1.0 && git push origin v0.1.0
 ```
 
 署名・公証はしていない（macOS はアドホック署名のみ）。ダウンロードした dmg のアプリは Gatekeeper に止められるので、
-初回は Finder で右クリック →「開く」とするか、次のコマンドで隔離属性を外す。
+「“HiPlay”は開いていません」と出たら「完了」で閉じ、次のコマンドで隔離属性を外す。
+（または「システム設定」→「プライバシーとセキュリティ」の「このまま開く」。macOS 15 以降は Finder の右クリック →「開く」では開けない）
+`gh release download` や `curl` で落とした dmg には隔離属性が付かないので、この手順はいらない。
 
 ```bash
-xattr -dr com.apple.quarantine "/Applications/HiFi Player.app"
+xattr -dr com.apple.quarantine "/Applications/HiPlay.app"
 ```
 
 Windows では、ブラウザで落としたファイルに付く「インターネットから来た」印（Mark of the Web）で SmartScreen の確認が出る。
 自分で使う分には、印を外せば確認なしで起動できる（エクスプローラーのプロパティで「許可する」にチェックしても同じ）。
 
 ```powershell
-Unblock-File .\HiFi.Player_0.1.0_x64-setup.exe
+Unblock-File .\HiPlay_0.1.0_x64-setup.exe
 ```
 
 `gh release download` や `curl.exe` で落としたファイルには、通常この印が付かない。
