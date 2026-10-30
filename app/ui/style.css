@@ -60,6 +60,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   padding: 10px 16px;
@@ -67,7 +68,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
   background: var(--panel);
 }
 .brand { font-weight: 600; letter-spacing: .02em; margin-right: 8px; }
-.device { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.device { display: flex; align-items: center; gap: 6px; color: var(--muted); min-width: 0; }
 .device select {
   font: inherit;
   color: var(--text);
@@ -76,8 +77,11 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
   border-radius: 6px;
   padding: 4px 8px;
   max-width: 280px;
+  min-width: 0;
 }
 .spacer { flex: 1; }
+/* 狭いときは 3 つのボタンをまとめて次の行へ送る */
+.actions { display: flex; gap: 10px; margin-left: auto; }
 .ghost { background: transparent; }
 
 .banner {
@@ -224,5 +228,4 @@ tbody tr.current td:nth-child(2) { color: var(--accent); font-weight: 600; }
   .cover { width: 120px; }
   .meta { flex: 1; min-width: 160px; }
   .signal, .transport { width: 100%; }
-  .toolbar { flex-wrap: wrap; }
 }

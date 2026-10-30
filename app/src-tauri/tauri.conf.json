@@ -14,8 +14,8 @@
         "title": "HiPlay",
         "width": 980,
         "height": 700,
-        "minWidth": 640,
-        "minHeight": 480,
+        "minWidth": 420,
+        "minHeight": 520,
         "dragDropEnabled": true
       }
     ],

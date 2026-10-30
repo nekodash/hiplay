@@ -46,14 +46,21 @@ Actions の実行結果の Artifacts に置く。`v0.1.0` のようなタグを 
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
-署名・公証はしていない（macOS はアドホック署名のみ）。ダウンロードした dmg のアプリは Gatekeeper に止められるので、
-「“HiPlay”は開いていません」と出たら「完了」で閉じ、次のコマンドで隔離属性を外す。
-（または「システム設定」→「プライバシーとセキュリティ」の「このまま開く」。macOS 15 以降は Finder の右クリック →「開く」では開けない）
-`gh release download` や `curl` で落とした dmg には隔離属性が付かないので、この手順はいらない。
+## macOS へのインストール
+
+署名・公証はしていない（アドホック署名のみ）。ブラウザで落とした dmg のアプリは Gatekeeper に止められるので、
+次のコマンドで入れる。curl で落とすと隔離属性が付かないので、確認なしで開ける。更新も同じコマンドでよい。
 
 ```bash
-xattr -dr com.apple.quarantine "/Applications/HiPlay.app"
+curl -fsSL https://raw.githubusercontent.com/nekodash/hiplay/main/scripts/install-macos.sh | bash
 ```
+
+公開済みのリリースのうち最新のものを入れる（下書きは対象外）。版を指定するときは `| bash -s v0.2.0`。
+
+ブラウザで落としてしまったときは、「“HiPlay”は開いていません」を「完了」で閉じ、
+「システム設定」→「プライバシーとセキュリティ」の「このまま開く」で許可する（macOS 15 以降は右クリック →「開く」では開けない）。
+
+## Windows へのインストール
 
 Windows では、ブラウザで落としたファイルに付く「インターネットから来た」印（Mark of the Web）で SmartScreen の確認が出る。
 自分で使う分には、印を外せば確認なしで起動できる（エクスプローラーのプロパティで「許可する」にチェックしても同じ）。
