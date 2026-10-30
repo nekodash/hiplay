@@ -37,6 +37,24 @@ cargo build --release
 
 再生中は `p`（一時停止）、`n`（次）、`b`（前）、`s 秒数`（シーク）、`q`（終了）を入力して Enter。
 
+## GitHub Actions
+
+`main` への push と PR で macOS（ユニバーサル版の dmg）と Windows（NSIS インストーラ）をビルドし、
+Actions の実行結果の Artifacts に置く。`v0.1.0` のようなタグを push すると、両方を添付したリリースの下書きを作る。
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+署名・公証はしていない（macOS はアドホック署名のみ）。ダウンロードした dmg のアプリは Gatekeeper に止められるので、
+初回は Finder で右クリック →「開く」とするか、次のコマンドで隔離属性を外す。
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/HiFi Player.app"
+```
+
+Windows の初回起動では SmartScreen の「詳細情報」→「実行」で起動する。
+
 ## 対応状況
 
 - [x] FLAC / ALAC / WAV / AIFF / MP3 / AAC
