@@ -1,6 +1,6 @@
 [package]
 name = "hifi-app"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "音質優先の音楽プレイヤー"
 publish = false

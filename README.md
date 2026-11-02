@@ -66,7 +66,7 @@ Windows では、ブラウザで落としたファイルに付く「インター
 自分で使う分には、印を外せば確認なしで起動できる（エクスプローラーのプロパティで「許可する」にチェックしても同じ）。
 
 ```powershell
-Unblock-File .\HiPlay_0.1.1_x64-setup.exe
+Unblock-File .\HiPlay_0.1.2_x64-setup.exe
 ```
 
 `gh release download` や `curl.exe` で落としたファイルには、通常この印が付かない。
