@@ -1,6 +1,7 @@
 //! 動作確認用の CLI。
 //!
 //!   hiplay devices
+//!   hiplay check <ファイルまたはフォルダ>...   （音を出さずに最後までデコードできるか確かめる）
 //!   hiplay [-d デバイス名] <ファイルまたはフォルダ>...
 //!
 //! 再生中は p+Enter で一時停止、n で次、b で前、s 秒数 でシーク、q で終了。
@@ -13,7 +14,7 @@ use std::time::Duration;
 
 use anyhow::{bail, Result};
 use hifi_engine::backend::list_devices;
-use hifi_engine::decoder::collect_files;
+use hifi_engine::decoder::{collect_files, Decoder};
 use hifi_engine::{Command, Player};
 
 fn main() -> Result<()> {
@@ -23,6 +24,7 @@ fn main() -> Result<()> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "devices" if inputs.is_empty() => return print_devices(),
+            "check" if inputs.is_empty() => return check(args.map(PathBuf::from).collect()),
             "-d" | "--device" => device = args.next(),
             _ => inputs.push(arg.into()),
         }
@@ -127,6 +129,46 @@ fn main() -> Result<()> {
         std::thread::sleep(Duration::from_millis(200));
     }
     println!();
+    Ok(())
+}
+
+fn check(inputs: Vec<PathBuf>) -> Result<()> {
+    let mut files = Vec::new();
+    for input in &inputs {
+        collect_files(input, &mut files);
+    }
+    let mut failed = 0;
+    for path in &files {
+        let name = path.display();
+        let result = Decoder::open(path).and_then(|mut dec| {
+            let ch = dec.source.channels as u64;
+            let mut frames = 0u64;
+            while let Some(block) = dec.next_block()? {
+                frames += block.len() as u64 / ch;
+            }
+            Ok((dec.codec.clone(), dec.source, dec.total_frames, frames))
+        });
+        match result {
+            Ok((codec, src, total, frames)) => {
+                let short = total.is_some_and(|t| frames + src.sample_rate as u64 / 10 < t);
+                if short {
+                    failed += 1;
+                }
+                println!(
+                    "{} {name}\n    {codec} {} Hz {}ch: {frames} / {} フレーム",
+                    if short { "途中で終了" } else { "OK" },
+                    src.sample_rate,
+                    src.channels,
+                    total.map_or("?".into(), |t| t.to_string()),
+                );
+            }
+            Err(e) => {
+                failed += 1;
+                println!("NG {name}\n    {e:#}");
+            }
+        }
+    }
+    println!("{} 件中 {} 件で問題あり", files.len(), failed);
     Ok(())
 }
 

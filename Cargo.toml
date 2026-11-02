@@ -2,6 +2,10 @@
 resolver = "2"
 members = ["engine", "cli", "app/src-tauri"]
 
+# m4a の gnre タグで開けなくなる問題を直したもの（vendor/symphonia-format-isomp4/HIPLAY_PATCH.md）
+[patch.crates-io]
+symphonia-format-isomp4 = { path = "vendor/symphonia-format-isomp4" }
+
 [profile.release]
 lto = true
 codegen-units = 1
